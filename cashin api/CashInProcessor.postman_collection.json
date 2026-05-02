@@ -1,0 +1,236 @@
+{
+  "info": {
+    "name": "CashIn Processor API",
+    "description": "Colección completa para integración con CashIn Processor. Incluye scripts automáticos para autenticación.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "BASE_URL",
+      "value": "http://localhost:8080",
+      "description": "URL base del servicio. Cambiar a producción cuando corresponda."
+    },
+    {
+      "key": "API_KEY",
+      "value": "tu-api-key-aqui",
+      "description": "API Key provista por el equipo de integración."
+    },
+    {
+      "key": "PSP_CODE",
+      "value": "01331",
+      "description": "Código del PSP."
+    },
+    {
+      "key": "PSP_HMAC_SECRET",
+      "value": "secret-psp-01331",
+      "description": "Secret HMAC del PSP para firmar los webhooks."
+    },
+    {
+      "key": "LAST_REQUEST_ID",
+      "value": "",
+      "description": "Se setea automáticamente al crear un CashIn Request."
+    },
+    {
+      "key": "LAST_TICKET_ID",
+      "value": "",
+      "description": "Se setea automáticamente al listar notificaciones fallidas."
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{BASE_URL}}/health",
+          "host": ["{{BASE_URL}}"],
+          "path": ["health"]
+        },
+        "description": "Verifica que el servicio esté levantado. No requiere autenticación."
+      },
+      "response": []
+    },
+    {
+      "name": "Cliente — Registrar CashIn Request",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 201) {",
+              "    const body = pm.response.json();",
+              "    pm.collectionVariables.set('LAST_REQUEST_ID', body.id);",
+              "    console.log('Request ID guardado:', body.id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{API_KEY}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"cuit\": \"20123456789\",\n  \"accountNumber\": \"0000123456\",\n  \"currency\": \"032\",\n  \"expectedAmount\": 1500.00,\n  \"clientCallbackUrl\": \"https://webhook.site/tu-url-aqui\",\n  \"nombre\": \"Juan Perez\",\n  \"referenciaString\": \"ORDEN-001\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/api/v1/cashin-requests",
+          "host": ["{{BASE_URL}}"],
+          "path": ["api", "v1", "cashin-requests"]
+        },
+        "description": "Registra una expectativa de cobro. Los campos 'currency' (default: 032) y 'expiresAt' (default: +30 min) son opcionales."
+      },
+      "response": []
+    },
+    {
+      "name": "Cliente — Consultar Estado del Request",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{API_KEY}}"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/api/v1/cashin-requests/{{LAST_REQUEST_ID}}",
+          "host": ["{{BASE_URL}}"],
+          "path": ["api", "v1", "cashin-requests", "{{LAST_REQUEST_ID}}"]
+        },
+        "description": "Consulta el estado de un CashIn Request. Usa el ID guardado automáticamente por el request anterior."
+      },
+      "response": []
+    },
+    {
+      "name": "Cliente — Ver Notificaciones Fallidas",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "    const body = pm.response.json();",
+              "    if (body.length > 0) {",
+              "        pm.collectionVariables.set('LAST_TICKET_ID', body[0].id);",
+              "        console.log('Primer ticket ID guardado:', body[0].id);",
+              "    } else {",
+              "        console.log('No hay notificaciones fallidas.');",
+              "    }",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{API_KEY}}"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/api/v1/notifications/failed",
+          "host": ["{{BASE_URL}}"],
+          "path": ["api", "v1", "notifications", "failed"]
+        },
+        "description": "Lista todos los tickets de notificación que fallaron tras 10 intentos."
+      },
+      "response": []
+    },
+    {
+      "name": "Cliente — Reintentar Notificación Fallida",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{API_KEY}}"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/api/v1/notifications/{{LAST_TICKET_ID}}/retry",
+          "host": ["{{BASE_URL}}"],
+          "path": ["api", "v1", "notifications", "{{LAST_TICKET_ID}}", "retry"]
+        },
+        "description": "Fuerza el reintento de una notificación fallida. Responde 202 si fue aceptado."
+      },
+      "response": []
+    },
+    {
+      "name": "PSP — Simular Webhook (con firma HMAC automática)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Genera la firma HMAC-SHA256 del body usando el secret del PSP",
+              "const body = pm.request.body.raw;",
+              "const secret = pm.collectionVariables.get('PSP_HMAC_SECRET');",
+              "",
+              "if (!body || !secret) {",
+              "    console.error('Faltan PSP_HMAC_SECRET o body');",
+              "} else {",
+              "    const signature = CryptoJS.HmacSHA256(body, secret).toString(CryptoJS.enc.Hex);",
+              "    pm.request.headers.upsert({ key: 'X-PSP-Signature', value: signature });",
+              "    console.log('X-PSP-Signature generada:', signature);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-PSP-Id",
+            "value": "{{PSP_CODE}}"
+          },
+          {
+            "key": "X-PSP-Signature",
+            "value": "se-genera-automaticamente-en-pre-request",
+            "description": "Este header se sobreescribe automáticamente por el Pre-request Script."
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"transactionId\": \"TXN-TEST-001\",\n  \"accountNumber\": \"0000123456\",\n  \"cuit\": \"20123456789\",\n  \"nombre\": \"Juan Perez\",\n  \"isMinor\": false,\n  \"amount\": 1500.00,\n  \"currency\": \"032\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/api/v1/psp/webhook",
+          "host": ["{{BASE_URL}}"],
+          "path": ["api", "v1", "psp", "webhook"]
+        },
+        "description": "Simula un pago entrante desde el PSP. El Pre-request Script calcula y agrega la firma HMAC-SHA256 automáticamente usando PSP_HMAC_SECRET.\n\nPara que el match funcione debe existir un CashIn Request pendiente con el mismo CUIT y currency."
+      },
+      "response": []
+    }
+  ]
+}

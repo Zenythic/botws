@@ -1,0 +1,444 @@
+{
+  "info": {
+    "name": "CashIn Processor API",
+    "description": "Colección completa para integración con CashIn Processor. Incluye scripts automáticos para autenticación.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Agrega X-API-Key automáticamente a todos los requests de la colección",
+          "const apiKey = pm.collectionVariables.get('API_KEY');",
+          "if (apiKey && apiKey !== 'tu-api-key-aqui') {",
+          "    pm.request.headers.upsert({ key: 'X-API-Key', value: apiKey });",
+          "} else {",
+          "    console.warn('Configurá la variable API_KEY en la colección antes de ejecutar.');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "BASE_URL",
+      "value": "http://localhost:8080",
+      "description": "URL base del servicio. Cambiar a producción cuando corresponda."
+    },
+    {
+      "key": "API_KEY",
+      "value": "tu-api-key-aqui",
+      "description": "API Key provista por el equipo de integración."
+    },
+    {
+      "key": "PSP_CODE",
+      "value": "01331",
+      "description": "Código del PSP."
+    },
+    {
+      "key": "PSP_HMAC_SECRET",
+      "value": "secret-psp-01331",
+      "description": "Secret HMAC del PSP para firmar los webhooks."
+    },
+    {
+      "key": "LAST_REQUEST_ID",
+      "value": "",
+      "description": "Se setea automáticamente al crear un CashIn Request."
+    },
+    {
+      "key": "LAST_TICKET_ID",
+      "value": "",
+      "description": "Se setea automáticamente al listar notificaciones fallidas."
+    },
+    {
+      "key": "LAST_PAYOUT_ID",
+      "value": "",
+      "description": "Se setea automáticamente al crear un PayOut Request."
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{BASE_URL}}/health",
+          "host": ["{{BASE_URL}}"],
+          "path": ["health"]
+        },
+        "description": "Verifica que el servicio esté levantado. No requiere autenticación."
+      },
+      "response": []
+    },
+    {
+      "name": "Cliente — Registrar CashIn Request",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 201) {",
+              "    const body = pm.response.json();",
+              "    pm.collectionVariables.set('LAST_REQUEST_ID', body.id);",
+              "    console.log('Request ID guardado:', body.id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{API_KEY}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"cuit\": \"20-12345678-9\",\n  \"accountNumber\": \"0123456789012345678012\",\n  \"currency\": \"032\",\n  \"expectedAmount\": 1500.00,\n  \"expiresAt\": \"2026-12-31T23:59:59Z\",\n  \"nombre\": \"Juan Perez\",\n  \"referenciaString\": \"ORDEN-001\",\n  \"referenciaInt\": 12345,\n  \"clientCallbackUrl\": \"https://webhook.site/tu-url-aqui\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/api/v1/cashin-requests",
+          "host": ["{{BASE_URL}}"],
+          "path": ["api", "v1", "cashin-requests"]
+        },
+        "description": "Registra una expectativa de cobro. Los campos 'currency' (default: 032) y 'expiresAt' (default: +30 min) son opcionales."
+      },
+      "response": []
+    },
+    {
+      "name": "Cliente — Consultar Estado del Request",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{API_KEY}}"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/api/v1/cashin-requests/{{LAST_REQUEST_ID}}",
+          "host": ["{{BASE_URL}}"],
+          "path": ["api", "v1", "cashin-requests", "{{LAST_REQUEST_ID}}"]
+        },
+        "description": "Consulta el estado de un CashIn Request. Usa el ID guardado automáticamente por el request anterior."
+      },
+      "response": []
+    },
+    {
+      "name": "Cliente — Ver Notificaciones Fallidas",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "    const body = pm.response.json();",
+              "    if (body.length > 0) {",
+              "        pm.collectionVariables.set('LAST_TICKET_ID', body[0].id);",
+              "        console.log('Primer ticket ID guardado:', body[0].id);",
+              "    } else {",
+              "        console.log('No hay notificaciones fallidas.');",
+              "    }",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{API_KEY}}"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/api/v1/notifications/failed",
+          "host": ["{{BASE_URL}}"],
+          "path": ["api", "v1", "notifications", "failed"]
+        },
+        "description": "Lista todos los tickets de notificación que fallaron tras 10 intentos."
+      },
+      "response": []
+    },
+    {
+      "name": "Cliente — Reintentar Notificación Fallida",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{API_KEY}}"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/api/v1/notifications/{{LAST_TICKET_ID}}/retry",
+          "host": ["{{BASE_URL}}"],
+          "path": ["api", "v1", "notifications", "{{LAST_TICKET_ID}}", "retry"]
+        },
+        "description": "Fuerza el reintento de una notificación fallida. Responde 202 si fue aceptado."
+      },
+      "response": []
+    },
+    {
+      "name": "Cliente — Obtener CVU",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{API_KEY}}"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/api/v1/cvu",
+          "host": ["{{BASE_URL}}"],
+          "path": ["api", "v1", "cvu"]
+        },
+        "description": "Devuelve el CVU, Alias y Nombre asociados al cliente autenticado. El sistema consulta el servicio interno usando el Codigo del cliente como Propietario."
+      },
+      "response": []
+    },
+    {
+      "name": "PayOut",
+      "item": [
+        {
+          "name": "Crear PayOut Request",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('LAST_PAYOUT_ID', body.id);",
+                  "    console.log('PayOut ID guardado:', body.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destination\": \"0000003100027270408385\",\n  \"amount\": 1000.00,\n  \"receiptFormat\": \"html\",\n  \"callbackUrl\": \"\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/payout/requests",
+              "host": ["{{BASE_URL}}"],
+              "path": ["api", "v1", "payout", "requests"]
+            },
+            "description": "Crea un pago saliente. El ID se guarda automáticamente en LAST_PAYOUT_ID.\n\nreceiptFormat: telegram | html | base64 | stringbase64\ncallbackUrl: si viene vacío usa el CallbackUrlCashOut del cliente (o CallbackUrl como fallback).\n\nRespuesta 202: { id, status: 'PENDING', message, createdAt }\nErrores:\n  401 → API Key inválida\n  422 NO_CVU_RECA → cliente sin CVU recaudador configurado\n  422 LIMIT_EXCEEDED → supera límite por transacción o diario\n  422 NO_PAYMENT_ACCOUNT → sin cuentas de pago disponibles"
+          },
+          "response": []
+        },
+        {
+          "name": "Crear PayOut — ReceiptFormat base64",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('LAST_PAYOUT_ID', body.id);",
+                  "    console.log('PayOut ID guardado:', body.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destination\": \"0000003100027270408385\",\n  \"amount\": 1000.00,\n  \"receiptFormat\": \"base64\",\n  \"callbackUrl\": \"https://webhook.site/tu-id-aqui\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/payout/requests",
+              "host": ["{{BASE_URL}}"],
+              "path": ["api", "v1", "payout", "requests"]
+            },
+            "description": "Crea un pago con comprobante en formato imagen binaria.\n\nEl callback recibe:\n  POST {callbackUrl}\n  Content-Type: image/jpeg\n  Body: <binary image data>"
+          },
+          "response": []
+        },
+        {
+          "name": "Crear PayOut — ReceiptFormat stringbase64",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('LAST_PAYOUT_ID', body.id);",
+                  "    console.log('PayOut ID guardado:', body.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destination\": \"0000003100027270408385\",\n  \"amount\": 1000.00,\n  \"receiptFormat\": \"stringbase64\",\n  \"callbackUrl\": \"https://webhook.site/tu-id-aqui\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/payout/requests",
+              "host": ["{{BASE_URL}}"],
+              "path": ["api", "v1", "payout", "requests"]
+            },
+            "description": "Crea un pago con comprobante como string base64 en JSON.\n\nEl callback recibe:\n  POST {callbackUrl}\n  Content-Type: application/json\n  Body: { \"status\": \"COMPLETED\", \"id\": 123, \"data\": {...}, \"receipt\": { \"format\": \"stringbase64\", \"content\": \"iVBORw0...\" } }"
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar Estado PayOut",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/payout/requests/{{LAST_PAYOUT_ID}}",
+              "host": ["{{BASE_URL}}"],
+              "path": ["api", "v1", "payout", "requests", "{{LAST_PAYOUT_ID}}"]
+            },
+            "description": "Consulta el estado de un PayOut por ID.\n\nRespuesta: { id, status: PENDING|COMPLETED|FAILED, isSuccessful, destination, amount, cvuPago, source, createdDate, modifiedDate, jsonCashOut }"
+          },
+          "response": []
+        },
+        {
+          "name": "Listar PayOuts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/payout/requests?isCompleted=false&page=1&pageSize=20",
+              "host": ["{{BASE_URL}}"],
+              "path": ["api", "v1", "payout", "requests"],
+              "query": [
+                { "key": "isCompleted", "value": "false", "description": "true | false (opcional)" },
+                { "key": "from", "value": "", "description": "Fecha desde (opcional, ej: 2026-03-01)", "disabled": true },
+                { "key": "to", "value": "", "description": "Fecha hasta (opcional, ej: 2026-03-31)", "disabled": true },
+                { "key": "page", "value": "1" },
+                { "key": "pageSize", "value": "20", "description": "Máximo 100" }
+              ]
+            },
+            "description": "Lista PayOuts del cliente autenticado con paginación y filtros opcionales.\n\nRespuesta: { page, pageSize, total, items: [...] }"
+          },
+          "response": []
+        },
+        {
+          "name": "Listar PayOuts — Completados hoy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/payout/requests?isCompleted=true&page=1&pageSize=50",
+              "host": ["{{BASE_URL}}"],
+              "path": ["api", "v1", "payout", "requests"],
+              "query": [
+                { "key": "isCompleted", "value": "true" },
+                { "key": "page", "value": "1" },
+                { "key": "pageSize", "value": "50" }
+              ]
+            },
+            "description": "Lista los PayOuts completados (exitosos o fallidos)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "PSP — Simular Webhook (con firma HMAC automática)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Genera la firma HMAC-SHA256 del body usando el secret del PSP",
+              "const body = pm.request.body.raw;",
+              "const secret = pm.collectionVariables.get('PSP_HMAC_SECRET');",
+              "",
+              "if (!body || !secret) {",
+              "    console.error('Faltan PSP_HMAC_SECRET o body');",
+              "} else {",
+              "    const signature = CryptoJS.HmacSHA256(body, secret).toString(CryptoJS.enc.Hex);",
+              "    pm.request.headers.upsert({ key: 'X-PSP-Signature', value: signature });",
+              "    console.log('X-PSP-Signature generada:', signature);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-PSP-Id",
+            "value": "{{PSP_CODE}}"
+          },
+          {
+            "key": "X-PSP-Signature",
+            "value": "se-genera-automaticamente-en-pre-request",
+            "description": "Este header se sobreescribe automáticamente por el Pre-request Script."
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"TicketType\": 1,\n  \"Amount\": 1500.00,\n  \"Currency\": 32,\n  \"Conciliation\": \"XJ8G7V95D0D1PJKR9EMPYR\",\n  \"ExternalId\": \"120070514\",\n  \"Origination\": {\n    \"Name\": \"Juan Perez\",\n    \"PersonIdType\": 1,\n    \"PersonId\": \"20123456789\",\n    \"Bank\": \"000\",\n    \"AccountType\": 1,\n    \"AccountNumber\": \"0000003100103064427801\",\n    \"Alias\": null,\n    \"AccountCurrency\": 32\n  },\n  \"Destination\": {\n    \"Name\": \"Empresa Destino\",\n    \"PersonIdType\": 1,\n    \"PersonId\": \"30123456789\",\n    \"Bank\": \"431\",\n    \"AccountType\": 0,\n    \"AccountNumber\": \"0000338200000000017859\",\n    \"Alias\": null,\n    \"AccountCurrency\": 32\n  },\n  \"TransferConceptId\": 9,\n  \"IsInternal\": false,\n  \"TicketStatusId\": 4,\n  \"CreatedById\": 1,\n  \"Date\": \"2026-03-04T12:00:00Z\",\n  \"Metadata\": null\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/webhook/cashin",
+          "host": ["{{BASE_URL}}"],
+          "path": ["webhook", "cashin"]
+        },
+        "description": "Simula un pago entrante desde el PSP. El Pre-request Script calcula y agrega la firma HMAC-SHA256 automáticamente usando PSP_HMAC_SECRET.\n\nPara que el match funcione debe existir un CashIn Request pendiente con el mismo CUIT y currency."
+      },
+      "response": []
+    }
+  ]
+}

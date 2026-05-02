@@ -1,0 +1,8 @@
+node_modules/
+.auth/
+.env
+npm-debug.log*
+data/
+.codex
+bot.tar.gz
+cloudflared-linux-amd64.deb

@@ -1,0 +1,33 @@
+{
+  "name": "bot-whatsapp",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node src/bot.js",
+    "dev": "node --watch src/bot.js",
+    "panel:start": "node src/panel/server.js",
+    "callback:start": "node src/callback/server.js",
+    "state:reset": "node src/reset-local-state.js",
+    "state:reset:all": "node src/reset-local-state.js --with-auth",
+    "esmeralda:auth": "node src/esmeralda/test-auth.js",
+    "esmeralda:sync-users": "node src/esmeralda/sync-users.js",
+    "esmeralda:create-user": "node src/esmeralda/create-user.js",
+    "esmeralda:add-credit": "node src/esmeralda/add-credit.js",
+    "esmeralda:deduct-credit": "node src/esmeralda/deduct-credit.js",
+    "esmeralda:lock-user": "node src/esmeralda/lock-user.js",
+    "esmeralda:change-password": "node src/esmeralda/change-password.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "baileys": "^7.0.0-rc.9",
+    "dotenv": "^17.3.1",
+    "pino": "^10.3.1",
+    "qrcode": "^1.5.4",
+    "sql.js": "^1.14.1"
+  }
+}
