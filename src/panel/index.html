@@ -875,6 +875,8 @@
                     </p>
                     <div class="panel-actions">
                       <button class="button" id="whatsapp-session-button">Generar QR nuevo</button>
+                      <button class="button-soft" id="local-reset-button">Reset</button>
+                      <button class="button-danger" id="local-reset-all-button">Reset All</button>
                     </div>
                     <div class="whatsapp-runtime-meta">
                       <div class="mini-card">
@@ -1028,6 +1030,8 @@
       const reloadRuntimeButton = document.getElementById('reload-runtime');
       const whatsappStatusPill = document.getElementById('whatsapp-status-pill');
       const whatsappSessionButton = document.getElementById('whatsapp-session-button');
+      const localResetButton = document.getElementById('local-reset-button');
+      const localResetAllButton = document.getElementById('local-reset-all-button');
       const whatsappStatusText = document.getElementById('whatsapp-status-text');
       const whatsappPhoneText = document.getElementById('whatsapp-phone-text');
       const whatsappSessionText = document.getElementById('whatsapp-session-text');
@@ -1860,6 +1864,53 @@
         }
       }
 
+      async function runLocalReset(includeAuth) {
+        const confirmed = window.confirm(
+          includeAuth
+            ? 'Esto va a borrar base, logs, adjuntos, comprobantes y también la sesión de WhatsApp. ¿Quieres seguir?'
+            : 'Esto va a borrar base, logs, adjuntos y comprobantes, pero conserva la sesión de WhatsApp. ¿Quieres seguir?',
+        );
+
+        if (!confirmed) {
+          return;
+        }
+
+        localResetButton.disabled = true;
+        localResetAllButton.disabled = true;
+        whatsappSessionButton.disabled = true;
+
+        try {
+          const response = await apiFetch('/api/runtime/local-reset', {
+            method: 'POST',
+            body: JSON.stringify({
+              includeAuth,
+              reason: includeAuth ? 'panel_reset_all' : 'panel_reset',
+            }),
+          });
+
+          runtimeState = response.runtime || runtimeState;
+          renderStatusStrip();
+          renderWhatsAppRuntime();
+          scheduleWhatsAppRuntimeBurstRefresh();
+          await Promise.all([
+            loadMetrics().catch(() => undefined),
+            loadConversations().catch(() => undefined),
+          ]);
+
+          showNotice(
+            includeAuth
+              ? 'Reset total ejecutado. La sesión de WhatsApp quedó lista para volver a vincularse.'
+              : 'Reset ejecutado. La sesión de WhatsApp se conservó.',
+          );
+        } catch (error) {
+          showNotice(error.message, 'error');
+        } finally {
+          localResetButton.disabled = false;
+          localResetAllButton.disabled = false;
+          whatsappSessionButton.disabled = false;
+        }
+      }
+
       globalToggleButton.addEventListener('click', toggleGlobalPause);
       tabButtons.forEach((button) => {
         button.addEventListener('click', () => {
@@ -1873,6 +1924,12 @@
         loadRuntime().catch((error) => showNotice(error.message, 'error'));
       });
       whatsappSessionButton.addEventListener('click', resetWhatsAppSession);
+      localResetButton.addEventListener('click', () => {
+        runLocalReset(false);
+      });
+      localResetAllButton.addEventListener('click', () => {
+        runLocalReset(true);
+      });
       conversationToggleButton.addEventListener('click', toggleConversationPause);
       conversationDeleteButton.addEventListener('click', deleteConversation);
       saveRulesButton.addEventListener('click', saveRules);

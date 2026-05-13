@@ -24,6 +24,7 @@ import {
   readWhatsAppRuntimeState,
   requestWhatsAppSessionReset,
 } from '../whatsapp/runtime.js';
+import { runLocalStateReset } from '../reset-state.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -191,6 +192,32 @@ async function handleRuntimeRequest(request, response, url) {
     sendJson(response, 202, {
       ok: true,
       command,
+      runtime: await buildRuntimePayload(runtime),
+    });
+    return;
+  }
+
+  if (url.pathname === '/api/runtime/local-reset') {
+    if (request.method !== 'PUT' && request.method !== 'POST') {
+      sendMethodNotAllowed(response);
+      return;
+    }
+
+    const body = await readJsonBody(request);
+    const includeAuth = Boolean(body.includeAuth);
+
+    if (includeAuth) {
+      await requestWhatsAppSessionReset({
+        reason: body.reason || 'panel_reset_all',
+      });
+    }
+
+    const result = await runLocalStateReset({ includeAuth });
+    const runtime = await getBotRuntimeState();
+
+    sendJson(response, 200, {
+      ok: true,
+      result,
       runtime: await buildRuntimePayload(runtime),
     });
     return;
