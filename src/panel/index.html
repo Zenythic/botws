@@ -495,6 +495,65 @@
         padding: 18px;
       }
 
+      .whatsapp-runtime-panel {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(260px, 340px);
+        gap: 16px;
+        align-items: stretch;
+      }
+
+      .whatsapp-runtime-copy {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .whatsapp-runtime-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .whatsapp-runtime-meta {
+        margin-top: 14px;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .whatsapp-runtime-meta .mini-card {
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .qr-box {
+        border-radius: 24px;
+        border: 1px dashed var(--line-strong);
+        background: rgba(255, 255, 255, 0.75);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 18px;
+        min-height: 320px;
+        text-align: center;
+      }
+
+      .qr-box img {
+        width: min(100%, 280px);
+        height: auto;
+        border-radius: 18px;
+        background: #fff;
+        padding: 12px;
+        border: 1px solid var(--line);
+      }
+
+      .qr-caption {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
       .panel p {
         margin: 10px 0 0;
         color: var(--muted);
@@ -718,7 +777,12 @@
 
         .conversation-subgrid,
         .control-grid,
-        .user-summary-grid {
+        .user-summary-grid,
+        .whatsapp-runtime-meta {
+          grid-template-columns: 1fr;
+        }
+
+        .whatsapp-runtime-panel {
           grid-template-columns: 1fr;
         }
 
@@ -797,6 +861,46 @@
 
             <section class="tab-panel" data-tab-panel="ops">
               <div class="tab-panel-scroll">
+                <article class="panel whatsapp-runtime-panel">
+                  <div class="whatsapp-runtime-copy">
+                    <div class="whatsapp-runtime-head">
+                      <div class="section-head">
+                        <h3>Conexión WhatsApp</h3>
+                      </div>
+                      <div id="whatsapp-status-pill" class="mini-pill active">Cargando...</div>
+                    </div>
+                    <p>
+                      Desde acá puedes reemplazar la sesión actual y generar un QR nuevo.
+                      Si ya hay una sesión activa, se borra y el bot queda esperando una nueva vinculación.
+                    </p>
+                    <div class="panel-actions">
+                      <button class="button" id="whatsapp-session-button">Generar QR nuevo</button>
+                    </div>
+                    <div class="whatsapp-runtime-meta">
+                      <div class="mini-card">
+                        <strong>Estado</strong>
+                        <div id="whatsapp-status-text">Cargando estado...</div>
+                      </div>
+                      <div class="mini-card">
+                        <strong>Número</strong>
+                        <div id="whatsapp-phone-text">-</div>
+                      </div>
+                      <div class="mini-card">
+                        <strong>Sesión guardada</strong>
+                        <div id="whatsapp-session-text">-</div>
+                      </div>
+                      <div class="mini-card">
+                        <strong>Última actualización</strong>
+                        <div id="whatsapp-updated-text">-</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="qr-box" id="whatsapp-qr-box">
+                    <div class="qr-caption">Todavía no hay QR disponible.</div>
+                  </div>
+                </article>
+
                 <section class="control-grid">
                   <article class="panel">
                     <div class="section-head">
@@ -922,6 +1026,13 @@
       const conversationDeleteButton = document.getElementById('conversation-delete');
       const runtimeSummaryPill = document.getElementById('runtime-summary-pill');
       const reloadRuntimeButton = document.getElementById('reload-runtime');
+      const whatsappStatusPill = document.getElementById('whatsapp-status-pill');
+      const whatsappSessionButton = document.getElementById('whatsapp-session-button');
+      const whatsappStatusText = document.getElementById('whatsapp-status-text');
+      const whatsappPhoneText = document.getElementById('whatsapp-phone-text');
+      const whatsappSessionText = document.getElementById('whatsapp-session-text');
+      const whatsappUpdatedText = document.getElementById('whatsapp-updated-text');
+      const whatsappQrBox = document.getElementById('whatsapp-qr-box');
       const agentPromptEditor = document.getElementById('agent-prompt-editor');
       const actionPromptEditor = document.getElementById('action-prompt-editor');
       const rulesMeta = document.getElementById('rules-meta');
@@ -1016,6 +1127,24 @@
         const linkedContacts = Number(metricsState?.linkedContacts || 0);
         const promptUpdatedAt =
           promptState?.agentUpdatedAt || promptState?.actionUpdatedAt || null;
+        const whatsappState = runtimeState?.whatsapp || null;
+        const whatsappLabel =
+          whatsappState?.status === 'open'
+            ? 'WhatsApp conectado'
+            : whatsappState?.status === 'qr'
+            ? 'WhatsApp esperando QR'
+            : whatsappState?.status === 'connecting'
+            ? 'WhatsApp conectando'
+            : whatsappState?.status === 'resetting' ||
+              whatsappState?.status === 'reset_requested'
+            ? 'WhatsApp reiniciando'
+            : 'WhatsApp sin conexión';
+        const whatsappTone =
+          whatsappState?.status === 'open'
+            ? 'active'
+            : whatsappState?.status === 'qr' || whatsappState?.status === 'connecting'
+            ? 'active'
+            : 'paused';
 
         statusStrip.innerHTML = [
           `<div class="mini-pill ${globalPaused ? 'paused' : 'active'}">${
@@ -1023,6 +1152,7 @@
           }</div>`,
           `<div class="mini-pill active">${linkedContacts} contactos vinculados</div>`,
           `<div class="mini-pill ${pausedChats ? 'paused' : 'active'}">${pausedChats} chats pausados</div>`,
+          `<div class="mini-pill ${whatsappTone}">${escapeHtml(whatsappLabel)}</div>`,
           `<div class="mini-pill active">Prompts ${promptUpdatedAt ? 'actualizados ' + escapeHtml(formatDate(promptUpdatedAt)) : 'por defecto'}</div>`,
         ].join('');
 
@@ -1037,6 +1167,90 @@
           ? 'Toda la operación está pausada'
           : 'Toda la operación está activa';
         runtimeSummaryPill.className = 'mini-pill ' + (globalPaused ? 'paused' : 'active');
+      }
+
+      function renderWhatsAppRuntime() {
+        const whatsapp = runtimeState?.whatsapp || {};
+        const status = whatsapp.status || 'idle';
+        const isOpen = status === 'open';
+        const isQr = status === 'qr';
+        const isBusy =
+          status === 'connecting' ||
+          status === 'resetting' ||
+          status === 'reset_requested';
+
+        const statusLabel =
+          status === 'open'
+            ? 'Sesión activa'
+            : status === 'qr'
+            ? 'Esperando escaneo'
+            : status === 'connecting'
+            ? 'Conectando'
+            : status === 'resetting'
+            ? 'Reiniciando sesión'
+            : status === 'reset_requested'
+            ? 'Preparando QR nuevo'
+            : status === 'logged_out'
+            ? 'Sesión cerrada'
+            : status === 'replaced'
+            ? 'Sesión reemplazada'
+            : 'Sin conexión';
+
+        whatsappStatusPill.textContent = statusLabel;
+        whatsappStatusPill.className =
+          'mini-pill ' +
+          (isOpen || isQr || status === 'connecting' ? 'active' : 'paused');
+        whatsappStatusText.textContent = statusLabel;
+        whatsappPhoneText.textContent = whatsapp.phoneNumber || '-';
+        whatsappSessionText.textContent = whatsapp.sessionPresent ? 'Sí' : 'No';
+        whatsappUpdatedText.textContent = whatsapp.lastUpdateAt
+          ? formatDate(whatsapp.lastUpdateAt)
+          : '-';
+
+        whatsappSessionButton.disabled = isBusy;
+        whatsappSessionButton.textContent = isOpen
+          ? 'Cambiar sesión y generar QR'
+          : isQr
+          ? 'Reemplazar sesión y generar otro QR'
+          : isBusy
+          ? 'Procesando...'
+          : 'Generar QR nuevo';
+
+        const errorText = whatsapp.lastError
+          ? `<div class="qr-caption">${escapeHtml(whatsapp.lastError)}</div>`
+          : '';
+
+        if (whatsapp.qrDataUrl) {
+          whatsappQrBox.innerHTML = `
+            <img src="${escapeHtml(whatsapp.qrDataUrl)}" alt="QR de WhatsApp" />
+            <div class="qr-caption">
+              Escanéalo desde WhatsApp &gt; Dispositivos vinculados.
+              ${whatsapp.qrUpdatedAt ? 'Actualizado ' + escapeHtml(formatDate(whatsapp.qrUpdatedAt)) + '.' : ''}
+            </div>
+            ${errorText}
+          `;
+          return;
+        }
+
+        const emptyLabel =
+          status === 'open'
+            ? 'La sesión ya está conectada. Si quieres cambiarla, usa el botón de arriba.'
+            : isBusy
+            ? 'El bot está preparando una nueva vinculación. En cuanto llegue el QR te va a aparecer acá.'
+            : 'Todavía no hay QR disponible.';
+
+        whatsappQrBox.innerHTML = `
+          <div class="qr-caption">${escapeHtml(emptyLabel)}</div>
+          ${errorText}
+        `;
+      }
+
+      function scheduleWhatsAppRuntimeBurstRefresh() {
+        [1500, 3000, 5000, 8000].forEach((delay) => {
+          window.setTimeout(() => {
+            loadRuntime().catch(() => undefined);
+          }, delay);
+        });
       }
 
       function metricCard(label, value) {
@@ -1378,6 +1592,7 @@
         runtimeState = await apiFetch('/api/runtime');
         renderStatusStrip();
         renderConversationControls();
+        renderWhatsAppRuntime();
       }
 
       async function loadPromptSettings() {
@@ -1612,6 +1827,39 @@
         }
       }
 
+      async function resetWhatsAppSession() {
+        const whatsapp = runtimeState?.whatsapp || {};
+        const confirmed = window.confirm(
+          whatsapp.sessionPresent || whatsapp.status === 'open'
+            ? 'Esto va a borrar la sesión actual de WhatsApp y generar un QR nuevo. ¿Quieres seguir?'
+            : 'Se va a generar una nueva vinculación por QR. ¿Quieres seguir?',
+        );
+
+        if (!confirmed) {
+          return;
+        }
+
+        whatsappSessionButton.disabled = true;
+
+        try {
+          const response = await apiFetch('/api/runtime/whatsapp/session-reset', {
+            method: 'POST',
+            body: JSON.stringify({
+              reason: 'panel',
+            }),
+          });
+          runtimeState = response.runtime || runtimeState;
+          renderStatusStrip();
+          renderWhatsAppRuntime();
+          scheduleWhatsAppRuntimeBurstRefresh();
+          showNotice('Listo, el bot quedó preparando una sesión nueva.');
+        } catch (error) {
+          showNotice(error.message, 'error');
+        } finally {
+          whatsappSessionButton.disabled = false;
+        }
+      }
+
       globalToggleButton.addEventListener('click', toggleGlobalPause);
       tabButtons.forEach((button) => {
         button.addEventListener('click', () => {
@@ -1624,6 +1872,7 @@
       reloadRuntimeButton.addEventListener('click', () => {
         loadRuntime().catch((error) => showNotice(error.message, 'error'));
       });
+      whatsappSessionButton.addEventListener('click', resetWhatsAppSession);
       conversationToggleButton.addEventListener('click', toggleConversationPause);
       conversationDeleteButton.addEventListener('click', deleteConversation);
       saveRulesButton.addEventListener('click', saveRules);

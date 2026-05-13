@@ -20,6 +20,10 @@ import {
   updateBotPromptSettings,
   updateBotAiRules,
 } from '../esmeralda/index.js';
+import {
+  readWhatsAppRuntimeState,
+  requestWhatsAppSessionReset,
+} from '../whatsapp/runtime.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -64,6 +68,13 @@ function buildPromptPayload(runtime) {
   };
 }
 
+async function buildRuntimePayload(runtime) {
+  return {
+    ...runtime,
+    whatsapp: await readWhatsAppRuntimeState(),
+  };
+}
+
 async function readJsonBody(request) {
   const chunks = [];
 
@@ -105,7 +116,7 @@ async function handleRuntimeRequest(request, response, url) {
     }
 
     const runtime = await getBotRuntimeState();
-    sendJson(response, 200, runtime);
+    sendJson(response, 200, await buildRuntimePayload(runtime));
     return;
   }
 
@@ -120,7 +131,7 @@ async function handleRuntimeRequest(request, response, url) {
       paused: Boolean(body.paused),
       reason: body.reason || '',
     });
-    sendJson(response, 200, runtime);
+    sendJson(response, 200, await buildRuntimePayload(runtime));
     return;
   }
 
@@ -140,7 +151,7 @@ async function handleRuntimeRequest(request, response, url) {
     const runtime = await updateBotAiRules({
       rulesText: body.rulesText || '',
     });
-    sendJson(response, 200, runtime);
+    sendJson(response, 200, await buildRuntimePayload(runtime));
     return;
   }
 
@@ -162,6 +173,26 @@ async function handleRuntimeRequest(request, response, url) {
       actionSystemPrompt: body.actionSystemPrompt || '',
     });
     sendJson(response, 200, buildPromptPayload(runtime));
+    return;
+  }
+
+  if (url.pathname === '/api/runtime/whatsapp/session-reset') {
+    if (request.method !== 'PUT' && request.method !== 'POST') {
+      sendMethodNotAllowed(response);
+      return;
+    }
+
+    const body = await readJsonBody(request);
+    const command = await requestWhatsAppSessionReset({
+      reason: body.reason || 'panel',
+    });
+    const runtime = await getBotRuntimeState();
+
+    sendJson(response, 202, {
+      ok: true,
+      command,
+      runtime: await buildRuntimePayload(runtime),
+    });
     return;
   }
 

@@ -57,12 +57,54 @@ import {
 } from './media.js';
 import { runWithTypingPresence } from './presence.js';
 import { enqueueChatTask } from './queue.js';
+import {
+  clearWhatsAppCommand,
+  deleteStoredWhatsAppSession,
+  readWhatsAppCommand,
+  writeWhatsAppRuntimeState,
+} from './runtime.js';
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 const pendingChatBatches = new Map();
 const CASHIN_MONITOR_INTERVAL_MS = 30_000;
 let cashInMonitorInterval = null;
 let cashInMonitorRunning = false;
+let currentSock = null;
+let botStartPromise = null;
+let reconnectTimer = null;
+let commandMonitorInterval = null;
+let manualSessionResetInProgress = false;
+let lastProcessedCommandId = null;
+
+function clearReconnectTimer() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function scheduleReconnect(delayMs = 1_500) {
+  if (manualSessionResetInProgress) {
+    return;
+  }
+
+  clearReconnectTimer();
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    void startBot();
+  }, delayMs);
+}
+
+function extractOwnPhoneNumber(sock) {
+  const rawId = String(sock?.user?.id || '').trim();
+
+  if (!rawId) {
+    return null;
+  }
+
+  const digits = rawId.replace(/\D/g, '');
+  return digits || null;
+}
 
 function getOrCreateChatBatch(chatId) {
   let batch = pendingChatBatches.get(chatId);
@@ -485,6 +527,82 @@ function startCashInMonitor(sock) {
   });
 }
 
+async function performWhatsAppSessionReset(reason = 'panel') {
+  manualSessionResetInProgress = true;
+  clearReconnectTimer();
+
+  await writeWhatsAppRuntimeState({
+    status: 'resetting',
+    connection: 'resetting',
+    qrDataUrl: null,
+    qrAvailable: false,
+    qrUpdatedAt: null,
+    lastError: null,
+  }).catch(() => null);
+
+  const sock = currentSock;
+  currentSock = null;
+
+  if (sock) {
+    try {
+      await sock.logout(`reset:${reason}`);
+    } catch (error) {
+      logger.warn({ err: error }, 'No se pudo cerrar la sesion actual antes del reseteo');
+    }
+
+    try {
+      sock.end(undefined);
+    } catch (error) {
+      logger.warn({ err: error }, 'No se pudo cerrar el socket actual durante el reseteo');
+    }
+  }
+
+  pendingChatBatches.clear();
+  await deleteStoredWhatsAppSession().catch((error) => {
+    logger.warn({ err: error }, 'No se pudo borrar la carpeta .auth durante el reseteo');
+  });
+
+  manualSessionResetInProgress = false;
+  await startBot();
+}
+
+async function processWhatsAppCommand(command) {
+  if (!command?.id || command.id === lastProcessedCommandId) {
+    return;
+  }
+
+  lastProcessedCommandId = command.id;
+  await clearWhatsAppCommand().catch(() => null);
+
+  if (command.action === 'reset_session') {
+    logger.info(
+      { commandId: command.id, reason: command.reason || 'panel' },
+      'Llego una orden para resetear la sesion de WhatsApp',
+    );
+    await performWhatsAppSessionReset(command.reason || 'panel');
+  }
+}
+
+function startWhatsAppCommandMonitor() {
+  if (commandMonitorInterval) {
+    return;
+  }
+
+  commandMonitorInterval = setInterval(() => {
+    readWhatsAppCommand()
+      .then((command) => {
+        if (command) {
+          return processWhatsAppCommand(command);
+        }
+
+        return null;
+      })
+      .catch((error) => {
+        logger.warn({ err: error }, 'No se pudo revisar el buzón de comandos de WhatsApp');
+      });
+  }, 1_500);
+}
+
 async function generateAndSendBatchReply(sock, batch, items) {
   const latestItem = items[items.length - 1];
   const remoteJid = latestItem.remoteJid;
@@ -830,17 +948,41 @@ function setupConnectionHandler(sock) {
   let pairingCodeRequested = false;
 
   sock.ev.on('connection.update', async (update) => {
+    if (sock !== currentSock) {
+      return;
+    }
+
     const { connection, lastDisconnect, qr } = update;
 
     if (qr && !shouldUsePairingCode()) {
-      const qrCode = await QRCode.toString(qr, {
-        type: 'terminal',
-        small: true,
-      });
+      const [qrCode, qrDataUrl] = await Promise.all([
+        QRCode.toString(qr, {
+          type: 'terminal',
+          small: true,
+        }),
+        QRCode.toDataURL(qr, {
+          margin: 1,
+          width: 320,
+        }),
+      ]);
       console.log(qrCode);
+      await writeWhatsAppRuntimeState({
+        status: 'qr',
+        connection: connection || 'connecting',
+        qrDataUrl,
+        qrAvailable: true,
+        qrUpdatedAt: new Date().toISOString(),
+        lastError: null,
+      }).catch(() => null);
       logger.info(
         'Escanea el QR desde WhatsApp > Dispositivos vinculados para conectar el bot.',
       );
+    } else if (connection === 'connecting') {
+      await writeWhatsAppRuntimeState({
+        status: 'connecting',
+        connection: 'connecting',
+        lastError: null,
+      }).catch(() => null);
     }
 
     if (
@@ -863,13 +1005,48 @@ function setupConnectionHandler(sock) {
     }
 
     if (connection === 'open') {
+      await writeWhatsAppRuntimeState({
+        status: 'open',
+        connection: 'open',
+        qrDataUrl: null,
+        qrAvailable: false,
+        qrUpdatedAt: null,
+        phoneNumber: extractOwnPhoneNumber(sock),
+        whatsappId: sock.user?.id || null,
+        lastError: null,
+      }).catch(() => null);
       logger.info('Conexion abierta. El bot ya puede responder mensajes.');
     }
 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const errorMessage = String(
+        lastDisconnect?.error?.message ||
+          lastDisconnect?.error?.stack ||
+          lastDisconnect?.error ||
+          '',
+      ).slice(0, 400);
+
+      await writeWhatsAppRuntimeState({
+        status: manualSessionResetInProgress ? 'resetting' : 'closed',
+        connection: 'close',
+        qrDataUrl: null,
+        qrAvailable: false,
+        qrUpdatedAt: null,
+        lastError: errorMessage || null,
+      }).catch(() => null);
+
+      if (manualSessionResetInProgress) {
+        logger.info('La conexion se cerro como parte de un reseteo manual de sesion.');
+        return;
+      }
 
       if (statusCode === DisconnectReason.loggedOut) {
+        currentSock = null;
+        await writeWhatsAppRuntimeState({
+          status: 'logged_out',
+          connection: 'close',
+        }).catch(() => null);
         logger.error(
           'La sesion se cerro y WhatsApp marco el dispositivo como desconectado. Borra .auth y vuelve a vincular.',
         );
@@ -877,6 +1054,11 @@ function setupConnectionHandler(sock) {
       }
 
       if (statusCode === DisconnectReason.connectionReplaced) {
+        currentSock = null;
+        await writeWhatsAppRuntimeState({
+          status: 'replaced',
+          connection: 'close',
+        }).catch(() => null);
         logger.warn(
           'La conexion fue reemplazada por otra sesion. Asegurate de tener un solo proceso del bot corriendo.',
         );
@@ -884,34 +1066,61 @@ function setupConnectionHandler(sock) {
       }
 
       logger.warn({ statusCode }, 'Conexion cerrada. Reintentando...');
-      startBot();
+      currentSock = null;
+      scheduleReconnect();
     }
   });
 }
 
 export async function startBot() {
+  if (botStartPromise) {
+    return botStartPromise;
+  }
+
+  if (currentSock) {
+    return currentSock;
+  }
+
   assertOpenRouterConfig();
+  startWhatsAppCommandMonitor();
+  clearReconnectTimer();
 
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
-  const { version, isLatest } = await fetchLatestBaileysVersion();
+  botStartPromise = (async () => {
+    const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
+    const { version, isLatest } = await fetchLatestBaileysVersion();
 
-  logger.info(
-    { version: version.join('.'), isLatest, model: getModelName() },
-    'Iniciando conexion con WhatsApp',
-  );
+    logger.info(
+      { version: version.join('.'), isLatest, model: getModelName() },
+      'Iniciando conexion con WhatsApp',
+    );
 
-  const sock = makeWASocket({
-    version,
-    logger,
-    auth: {
-      creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, logger),
-    },
-    markOnlineOnConnect: false,
+    await writeWhatsAppRuntimeState({
+      status: 'connecting',
+      connection: 'connecting',
+      qrDataUrl: null,
+      qrAvailable: false,
+      qrUpdatedAt: null,
+      lastError: null,
+    }).catch(() => null);
+
+    const sock = makeWASocket({
+      version,
+      logger,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, logger),
+      },
+      markOnlineOnConnect: false,
+    });
+
+    currentSock = sock;
+    sock.ev.on('creds.update', saveCreds);
+    setupConnectionHandler(sock);
+    setupMessageHandler(sock);
+    startCashInMonitor(sock);
+  })().finally(() => {
+    botStartPromise = null;
   });
 
-  sock.ev.on('creds.update', saveCreds);
-  setupConnectionHandler(sock);
-  setupMessageHandler(sock);
-  startCashInMonitor(sock);
+  return botStartPromise;
 }
