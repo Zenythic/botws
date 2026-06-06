@@ -291,7 +291,7 @@ export async function generateCasinoOutcomeReply({
   const replyText = sanitizeReply(rawText);
 
   if (!replyText) {
-    throw new Error('OpenRouter devolvio una respuesta vacia');
+    throw new Error('Gemini devolvio una respuesta vacia');
   }
 
   return replyText;

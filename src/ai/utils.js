@@ -52,7 +52,7 @@ export function extractJsonObject(rawText) {
   const trimmed = String(rawText || '').trim();
 
   if (!trimmed) {
-    throw new Error('OpenRouter devolvio JSON vacio');
+    throw new Error('Gemini devolvio JSON vacio');
   }
 
   const withoutFence = trimmed

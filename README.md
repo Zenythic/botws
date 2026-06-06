@@ -7,7 +7,7 @@ Primer hito del proyecto: que el numero se conecte y responda cuando le escribes
 - Conecta una cuenta de WhatsApp con Baileys.
 - Guarda la sesion en `.auth/` para no escanear QR cada vez.
 - Escucha mensajes nuevos en chats directos.
-- Responde usando OpenRouter con memoria corta por chat.
+- Responde usando Gemini con memoria corta por chat.
 - Espera entre 7 y 25 segundos antes de contestar para que no responda instantaneamente.
 
 ## Requisitos
@@ -26,8 +26,8 @@ El proyecto lee variables desde `.env`.
 
 Variables principales:
 
-- `OPENROUTER_API_KEY`
-- `OPENROUTER_MODEL`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
 - `LOG_LEVEL`
 - `ESMERALDA_BASE_URL`
 - `ESMERALDA_USER`
@@ -71,7 +71,7 @@ USE_PAIRING_CODE=true PHONE_NUMBER=573001234567 npm start
 - `src/whatsapp/`: conexion con Baileys, colas por chat, demoras y presencia.
 - `data/whatsapp-media/`: comprobantes y adjuntos descargados desde WhatsApp.
 - `src/casino/`: logica conversacional del agente y ejecucion de acciones.
-- `src/ai/`: prompts, cliente de OpenRouter y generacion de planes/respuestas.
+- `src/ai/`: prompts, cliente de Gemini y generacion de planes/respuestas.
 - `src/esmeralda/`: autenticacion, operaciones del panel y persistencia SQLite.
 - `src/panel/`: panel web local para revisar conversaciones y metricas.
 - `.auth/`: credenciales locales de WhatsApp.
